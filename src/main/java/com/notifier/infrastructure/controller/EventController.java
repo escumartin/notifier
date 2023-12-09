@@ -22,8 +22,8 @@ public class EventController {
         this.googleCalendarApi = googleCalendarApi;
     }
 
-    @GetMapping("/upcoming")
-    public List<EventDTO> getUpcomingEvents() throws IOException, GeneralSecurityException {
-        return googleCalendarApi.getUpcomingEvents();
+    @GetMapping("/today")
+    public List<EventDTO> getTodayEvents() throws IOException, GeneralSecurityException {
+        return googleCalendarApi.getTodayEvents();
     }
 }

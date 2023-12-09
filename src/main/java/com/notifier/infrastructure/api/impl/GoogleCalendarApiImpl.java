@@ -27,7 +27,10 @@ import java.io.InputStreamReader;
 import java.security.GeneralSecurityException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -45,15 +48,22 @@ public class GoogleCalendarApiImpl implements GoogleCalendarService {
 
 
     @Override
-    public List<EventDTO> getUpcomingEvents() {
+    public List<EventDTO> getTodayEvents() {
         try {
             NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
             Credential credential = getCredentials(HTTP_TRANSPORT);
             Calendar service = buildCalendarService(HTTP_TRANSPORT, credential);
 
-            Events googleEvents = service.events().list("primary").execute();
-            List<com.google.api.services.calendar.model.Event> googleCalendarEvents = googleEvents.getItems();
+            LocalDate currentDate = LocalDate.now();
+            DateTime startDateTime = new DateTime(currentDate.atStartOfDay().toInstant(ZoneId.systemDefault().getRules().getOffset(currentDate.atStartOfDay())).toEpochMilli());
+            DateTime endDateTime = new DateTime(currentDate.atTime(23, 59, 59).toInstant(ZoneId.systemDefault().getRules().getOffset(currentDate.atTime(23, 59, 59))).toEpochMilli());
 
+            Events googleEvents = service.events().list("primary")
+                    .setTimeMin(startDateTime)
+                    .setTimeMax(endDateTime)
+                    .execute();
+
+            List<com.google.api.services.calendar.model.Event> googleCalendarEvents = googleEvents.getItems();
             List<Event> todayEvents = adaptGoogleEvents(googleCalendarEvents);
 
             return todayEvents.stream()
@@ -65,35 +75,57 @@ public class GoogleCalendarApiImpl implements GoogleCalendarService {
     }
 
     private List<Event> adaptGoogleEvents(List<com.google.api.services.calendar.model.Event> googleCalendarEvents) {
-        return filterTodayEvents(googleCalendarEvents)
-                .stream()
-                .map(googleEventMapper::toDomain)
+        return googleCalendarEvents.stream()
+                .map(this::adaptGoogleEvent)
                 .collect(Collectors.toList());
     }
 
-    private List<com.google.api.services.calendar.model.Event> filterTodayEvents(List<com.google.api.services.calendar.model.Event> events) {
-        LocalDate currentDate = LocalDate.now();
+    private Event adaptGoogleEvent(com.google.api.services.calendar.model.Event googleEvent) {
+        String title = googleEvent.getSummary();
+        String description = googleEvent.getDescription();
 
-        return events.stream()
-                .filter(event -> isEventToday(event, currentDate))
-                .collect(Collectors.toList());
+        DateTime startDateTime = googleEvent.getStart().getDateTime();
+        LocalDateTime dateTime;
+
+        if (startDateTime != null) {
+            // Si hay fecha y hora específicas
+            dateTime = parseDateTime(startDateTime.toStringRfc3339());
+        } else {
+            // Si es un evento de todo el día
+            dateTime = parseDateTime(googleEvent.getStart().getDate().toString());
+        }
+
+        boolean isAllDay = (googleEvent.getStart().getDateTime() == null);
+
+        return new Event(title, description, dateTime, isAllDay);
     }
+
+    private LocalDateTime parseDateTime(String dateTimeString) {
+        try {
+            // Intenta parsear la cadena de fecha y hora con el formateador ISO 8601
+            return LocalDateTime.parse(dateTimeString, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        } catch (DateTimeParseException e) {
+            // En caso de error, intenta parsear la cadena sin información de zona horaria
+            return LocalDate.parse(dateTimeString).atStartOfDay();
+        }
+    }
+
+
 
     private boolean isEventToday(com.google.api.services.calendar.model.Event googleEvent, LocalDate currentDate) {
         DateTime eventDateTime = googleEvent.getStart().getDateTime();
+
         if (eventDateTime == null) {
             // Si no hay una fecha y hora específicas, consideramos la fecha
             eventDateTime = googleEvent.getStart().getDate();
         }
 
-        // Convertir DateTime a LocalDate
-        LocalDate eventDate = LocalDate.ofInstant(
-                Instant.ofEpochMilli(eventDateTime.getValue()),
-                ZoneId.systemDefault()
-        );
+        // Convertir DateTime a Instant y luego a LocalDate
+        Instant instant = Instant.ofEpochMilli(eventDateTime.getValue());
+        LocalDate eventDate = instant.atZone(ZoneId.systemDefault()).toLocalDate();
 
-        // Compara si la fecha del evento es igual a la fecha actual
-        return eventDate.isEqual(currentDate);
+        // Compara si la fecha del evento es igual o posterior a la fecha actual
+        return !eventDate.isBefore(currentDate);
     }
 
     private Calendar buildCalendarService(NetHttpTransport HTTP_TRANSPORT, Credential credential) {
@@ -118,4 +150,6 @@ public class GoogleCalendarApiImpl implements GoogleCalendarService {
             return new AuthorizationCodeInstalledApp(flow, receiver).authorize("user");
         }
     }
+
+
 }
