@@ -1,33 +1,48 @@
-//package com.notifier.infrastructure.mapper.impl;
-//
-//import com.notifier.application.dto.EventDTO;
-//import com.notifier.domain.model.Event;
-//import com.notifier.infrastructure.mapper.EventMapper;
-//
-//import java.time.Instant;
-//
-//public class EventMapperImpl implements EventMapper {
-//    @Override
-//    public EventDTO toDTO(Event event) {
-//        // Lógica de mapeo de Event a EventDTO
-//        EventDTO eventDTO = new EventDTO();
-//        eventDTO.setSummary(event.getSummary());
-//        eventDTO.setStart(event.getStart());
-//        // ... otros campos
-//        return eventDTO;
-//    }
-//
-//    @Override
-//    public Event toDomain(com.google.api.services.calendar.model.Event googleEvent) {
-//        // Lógica de mapeo de com.google.api.services.calendar.model.Event a Event
-//        Event event = new Event();
-//
-//        // Asegúrate de convertir EventDateTime a Instant
-//        Instant startInstant = Instant.ofEpochMilli(googleEvent.getStart().getDateTime().getValue());
-//        event.setStart(startInstant);
-//
-//        event.setSummary(googleEvent.getSummary());
-//        // ... otros campos
-//        return event;
-//    }
-//}
+package com.notifier.infrastructure.mapper.impl;
+
+import com.google.api.services.calendar.model.Event;
+import com.notifier.application.dto.EventDTO;
+import com.notifier.infrastructure.mapper.EventMapper;
+import org.modelmapper.ModelMapper;
+import org.springframework.stereotype.Component;
+
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+
+@Component
+public class EventMapperImpl implements EventMapper {
+
+    private final ModelMapper modelMapper;
+
+    public EventMapperImpl(ModelMapper modelMapper) {
+        this.modelMapper = modelMapper;
+    }
+
+    @Override
+    public EventDTO mapToDTO(Event googleEvent) {
+        EventDTO eventDTO = modelMapper.map(googleEvent, EventDTO.class);
+
+        // Map the start date time field
+        if (googleEvent.getStart() != null) {
+            if (googleEvent.getStart().getDateTime() != null) {
+                eventDTO.setStartDateTime(toLocalDateTime(googleEvent.getStart().getDateTime().getValue()));
+            } else if (googleEvent.getStart().getDate() != null) {
+                // If it's an all-day event, set the start date without time
+                eventDTO.setStartDateTime(toLocalDateTime(googleEvent.getStart().getDate().getValue()));
+                eventDTO.setAllDay(true);
+            }
+        }
+
+        // Map the end date time field
+        if (googleEvent.getEnd() != null && googleEvent.getEnd().getDateTime() != null) {
+            eventDTO.setEndDateTime(toLocalDateTime(googleEvent.getEnd().getDateTime().getValue()));
+        }
+
+        return eventDTO;
+    }
+
+    private LocalDateTime toLocalDateTime(long milliseconds) {
+        return LocalDateTime.ofInstant(Instant.ofEpochMilli(milliseconds), ZoneId.systemDefault());
+    }
+}
